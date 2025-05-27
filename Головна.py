@@ -1,8 +1,8 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
+import folium
+from streamlit_folium import st_folium
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
@@ -70,10 +70,11 @@ def find_best_bs(user_lat, user_lon, base_stations):
     return best_bs, best_rsrp
 
 def create_network_map():
-    """Створення карти мережі з Mapbox"""
+    """Створення карти мережі"""
+    center = [49.2328, 28.4810]
+    m = folium.Map(location=center, zoom_start=12, tiles='OpenStreetMap')
     
-    # Підготовка даних для базових станцій
-    bs_data = []
+    # Додавання базових станцій
     for bs in st.session_state.base_stations:
         # Визначення кольору залежно від навантаження
         if bs['load'] < 30:
@@ -82,119 +83,59 @@ def create_network_map():
             color = 'orange'
         else:
             color = 'red'
-            
-        bs_data.append({
-            'lat': bs['lat'],
-            'lon': bs['lon'],
-            'name': bs['name'],
-            'load': bs['load'],
-            'users': bs['users'],
-            'power': bs['power'],
-            'color': color,
-            'type': 'BaseStation'
-        })
+        
+        folium.Marker(
+            [bs['lat'], bs['lon']],
+            popup=f"""
+            <div style="font-family: Arial; font-size: 12px;">
+                <b>{bs['name']}</b><br>
+                ID: {bs['id']}<br>
+                Потужність: {bs['power']} дБм<br>
+                Користувачі: {bs['users']}<br>
+                Навантаження: {bs['load']:.1f}%
+            </div>
+            """,
+            icon=folium.Icon(color=color, icon='tower-broadcast', prefix='fa'),
+            tooltip=f"{bs['name']} ({bs['load']:.1f}% load)"
+        ).add_to(m)
+        
+        # Зона покриття
+        folium.Circle(
+            location=[bs['lat'], bs['lon']],
+            radius=2000,  # 2 км
+            color=color,
+            fillColor=color,
+            fillOpacity=0.1,
+            weight=2
+        ).add_to(m)
     
-    # Підготовка даних для користувачів
-    user_data = []
+    # Додавання активних користувачів
     for user in st.session_state.users:
         if user['active']:
-            # Визначення кольору залежно від RSRP
+            # Визначення кольору залежно від якості сигналу
             if user['rsrp'] > -70:
-                color = 'green'
-            elif user['rsrp'] > -85:
-                color = 'yellow'
+                user_color = 'green'
+            elif user['rsrp'] > -90:
+                user_color = 'orange'
             else:
-                color = 'red'
-                
-            user_data.append({
-                'lat': user['lat'],
-                'lon': user['lon'],
-                'id': user['id'],
-                'rsrp': user['rsrp'],
-                'serving_bs': user['serving_bs'],
-                'speed': user['speed'],
-                'color': color,
-                'type': 'User'
-            })
+                user_color = 'red'
+            
+            folium.Marker(
+                [user['lat'], user['lon']],
+                popup=f"""
+                <div style="font-family: Arial; font-size: 12px;">
+                    <b>User {user['id']}</b><br>
+                    RSRP: {user['rsrp']:.1f} дБм<br>
+                    Serving BS: {user['serving_bs']}<br>
+                    Швидкість: {user['speed']} км/год<br>
+                    Throughput: {user['throughput']:.1f} Мбіт/с
+                </div>
+                """,
+                icon=folium.Icon(color=user_color, icon='mobile', prefix='fa'),
+                tooltip=f"User {user['id']} (RSRP: {user['rsrp']:.1f} дБм)"
+            ).add_to(m)
     
-    # Створення фігури
-    fig = go.Figure()
-    
-    # Додавання базових станцій
-    if bs_data:
-        import pandas as pd
-        bs_df = pd.DataFrame(bs_data)
-        
-        for color in ['green', 'orange', 'red']:
-            color_data = bs_df[bs_df['color'] == color]
-            if not color_data.empty:
-                fig.add_trace(go.Scattermapbox(
-                    lat=color_data['lat'],
-                    lon=color_data['lon'],
-                    mode='markers',
-                    marker=dict(
-                        size=15,
-                        color=color,
-                        symbol='circle'
-                    ),
-                    text=color_data['name'],
-                    hovertemplate='<b>%{text}</b><br>' +
-                                'Навантаження: %{customdata[0]:.1f}%<br>' +
-                                'Користувачі: %{customdata[1]}<br>' +
-                                'Потужність: %{customdata[2]} дБм<extra></extra>',
-                    customdata=color_data[['load', 'users', 'power']].values,
-                    name=f'БС ({color})',
-                    showlegend=True
-                ))
-    
-    # Додавання користувачів
-    if user_data:
-        import pandas as pd
-        user_df = pd.DataFrame(user_data)
-        
-        for color in ['green', 'yellow', 'red']:
-            color_data = user_df[user_df['color'] == color]
-            if not color_data.empty:
-                fig.add_trace(go.Scattermapbox(
-                    lat=color_data['lat'],
-                    lon=color_data['lon'],
-                    mode='markers',
-                    marker=dict(
-                        size=8,
-                        color=color,
-                        symbol='triangle-up'
-                    ),
-                    text=color_data['id'],
-                    hovertemplate='<b>%{text}</b><br>' +
-                                'RSRP: %{customdata[0]:.1f} дБм<br>' +
-                                'Обслуговуюча БС: %{customdata[1]}<br>' +
-                                'Швидкість: %{customdata[2]} км/год<extra></extra>',
-                    customdata=color_data[['rsrp', 'serving_bs', 'speed']].values,
-                    name=f'Користувачі ({color})',
-                    showlegend=True
-                ))
-    
-    # Налаштування карти
-    fig.update_layout(
-        mapbox=dict(
-            style="open-street-map",
-            center=dict(lat=49.2328, lon=28.4810),
-            zoom=11
-        ),
-        height=600,
-        margin=dict(r=0, t=0, l=0, b=0),
-        showlegend=True,
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=0.01,
-            bgcolor="rgba(255,255,255,0.8)"
-        )
-    )
-    
-    return fig
-
+    return m
 
 def generate_new_user():
     """Генерація нового користувача"""
@@ -360,8 +301,7 @@ with col1:
     
     # Створення та відображення карти
     network_map = create_network_map()
-    map_fig = create_network_map()
-    st.plotly_chart(map_fig, use_container_width=True, key="network_map")
+    map_data = st_folium(network_map, width=700, height=500, returned_objects=["last_clicked"])
 
 with col2:
     st.subheader("📊 Метрики мережі")
