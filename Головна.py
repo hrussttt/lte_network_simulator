@@ -17,6 +17,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def clean_data_for_pydeck(data):
+    """Очищення даних для PyDeck"""
+    if isinstance(data, list):
+        return [clean_data_for_pydeck(item) for item in data]
+    elif isinstance(data, dict):
+        return {k: clean_data_for_pydeck(v) for k, v in data.items()}
+    elif isinstance(data, np.integer):
+        return int(data)
+    elif isinstance(data, np.floating):
+        return float(data)
+    elif isinstance(data, np.ndarray):
+        return data.tolist()
+    elif pd.isna(data):
+        return None
+    else:
+        return data
+
 # Кастомний CSS для покращення дизайну
 st.markdown("""
 <style>
@@ -539,8 +556,14 @@ with col1:
     st.markdown("### 🗺️ Інтерактивна карта мережі LTE (Вінниця)")
     
     # Відображення Mapbox карти
+    
     deck = create_mapbox_lte_map()
+try:
     selected_data = st.pydeck_chart(deck, use_container_width=True, height=500)
+except Exception as e:
+    st.error(f"Помилка відображення карти: {str(e)}")
+    st.info("Спробуйте оновити сторінку")
+    selected_data = None
     
     # Освітні підказки під картою
     with st.expander("📚 Як читати карту", expanded=False):
