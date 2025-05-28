@@ -70,10 +70,29 @@ def find_best_bs(user_lat, user_lon, base_stations):
     return best_bs, best_rsrp
 
 def create_network_map():
-    """Створення карти мережі"""
+    """Створення карти мережі з використанням тайлів Mapbox"""
     center = [49.2328, 28.4810]
-    m = folium.Map(location=center, zoom_start=12, tiles='OpenStreetMap')
-    
+
+    # ---- Зміни для Mapbox ----
+    MAPBOX_API_KEY = "pk.eyJ1IjoiaHJ1c3N0dHQiLCJhIjoiY21iNnR0OXh1MDJ2ODJsczk3emdhdDh4ayJ9.CNygw7kmAPb6JGd0CFvUBg"
+    MAPBOX_STYLE_ID = "mapbox/light-v11" # Ваш бажаний стиль
+
+    # URL тайлів та атрибуція для Mapbox
+    tiles_url = f"https://api.mapbox.com/styles/v1/{MAPBOX_STYLE_ID}/tiles/{{z}}/{{x}}/{{y}}@2x?access_token={MAPBOX_API_KEY}"
+    attribution = (
+        '© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> '
+        '© <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a> '
+        '<strong><a href="https://www.mapbox.com/map-feedback/" target="_blank">Improve this map</a></strong>'
+    )
+    # --------------------------
+
+    m = folium.Map(
+        location=center,
+        zoom_start=12,
+        tiles=tiles_url,  # Використовуємо URL тайлів Mapbox
+        attr=attribution   # Додаємо атрибуцію Mapbox
+    )
+
     # Додавання базових станцій
     for bs in st.session_state.base_stations:
         # Визначення кольору залежно від навантаження
@@ -83,7 +102,7 @@ def create_network_map():
             color = 'orange'
         else:
             color = 'red'
-        
+
         folium.Marker(
             [bs['lat'], bs['lon']],
             popup=f"""
@@ -98,7 +117,7 @@ def create_network_map():
             icon=folium.Icon(color=color, icon='tower-broadcast', prefix='fa'),
             tooltip=f"{bs['name']} ({bs['load']:.1f}% load)"
         ).add_to(m)
-        
+
         # Зона покриття
         folium.Circle(
             location=[bs['lat'], bs['lon']],
@@ -108,7 +127,7 @@ def create_network_map():
             fillOpacity=0.1,
             weight=2
         ).add_to(m)
-    
+
     # Додавання активних користувачів
     for user in st.session_state.users:
         if user['active']:
@@ -119,7 +138,7 @@ def create_network_map():
                 user_color = 'orange'
             else:
                 user_color = 'red'
-            
+
             folium.Marker(
                 [user['lat'], user['lon']],
                 popup=f"""
@@ -134,7 +153,7 @@ def create_network_map():
                 icon=folium.Icon(color=user_color, icon='mobile', prefix='fa'),
                 tooltip=f"User {user['id']} (RSRP: {user['rsrp']:.1f} дБм)"
             ).add_to(m)
-    
+
     return m
 
 def generate_new_user():
