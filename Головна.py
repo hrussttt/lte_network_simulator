@@ -3,11 +3,11 @@ import numpy as np
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
-import plotly.graph_objects as go # Збережено з вашого коду
-import plotly.express as px # Збережено з вашого коду
-from datetime import datetime, timedelta # timedelta збережено з вашого коду
+import plotly.graph_objects as go
+import plotly.express as px
+from datetime import datetime, timedelta
 import time
-import random # Збережено з вашого коду (хоча np.random переважно використовується)
+import random
 from geopy.distance import geodesic
 
 # Налаштування сторінки
@@ -24,6 +24,7 @@ if 'network_active' not in st.session_state:
 if 'users' not in st.session_state:
     st.session_state.users = []
 if 'base_stations' not in st.session_state:
+    # Створення мережі базових станцій
     st.session_state.base_stations = [
         {'id': 'BS001', 'name': 'Центральна', 'lat': 49.2328, 'lon': 28.4810, 'power': 45, 'users': 0, 'load': 0},
         {'id': 'BS002', 'name': 'Північна', 'lat': 49.2520, 'lon': 28.4590, 'power': 42, 'users': 0, 'load': 0},
@@ -38,226 +39,376 @@ if 'network_metrics' not in st.session_state:
         'total_handovers': 0,
         'successful_handovers': 0,
         'failed_handovers': 0,
-        'average_rsrp': -85.0,  # Оновлено на float
-        'network_throughput': 0.0, # Оновлено на float
+        'average_rsrp': -85,
+        'network_throughput': 0,
         'active_users': 0
     }
 
 # Функції симуляції
 def calculate_rsrp(user_lat, user_lon, bs_lat, bs_lon, bs_power):
+    """Розрахунок RSRP на основі відстані та потужності"""
     distance = geodesic((user_lat, user_lon), (bs_lat, bs_lon)).kilometers
     if distance == 0:
         distance = 0.001
+    
+    # Спрощена модель втрат на трасі
     path_loss = 128.1 + 37.6 * np.log10(distance)
-    rsrp = bs_power - path_loss + np.random.normal(0, 2)
-    return float(max(-120, min(-40, rsrp))) # Забезпечуємо float
+    rsrp = bs_power - path_loss + np.random.normal(0, 2)  # +шум
+    return max(-120, min(-40, rsrp))
 
 def find_best_bs(user_lat, user_lon, base_stations):
-    best_bs_info = None # Змінено з best_bs
-    best_rsrp_val = -float('inf') # Змінено з -999 та best_rsrp
+    """Знаходження найкращої базової станції"""
+    best_bs = None
+    best_rsrp = -999
+    
     for bs in base_stations:
         rsrp = calculate_rsrp(user_lat, user_lon, bs['lat'], bs['lon'], bs['power'])
-        if rsrp > best_rsrp_val:
-            best_rsrp_val = rsrp
-            best_bs_info = bs
-    return best_bs_info, best_rsrp_val
+        if rsrp > best_rsrp:
+            best_rsrp = rsrp
+            best_bs = bs
+    
+    return best_bs, best_rsrp
 
-@st.cache_resource # Кешування базової карти
-def create_network_map_base():
-    """Створення базової карти мережі з Mapbox"""
+def create_network_map():
+    """Створення карти мережі з використанням тайлів Mapbox"""
     center = [49.2328, 28.4810]
+
+    # ---- Зміни для Mapbox ----
     MAPBOX_API_KEY = "pk.eyJ1IjoiaHJ1c3N0dHQiLCJhIjoiY21iNnR0OXh1MDJ2ODJsczk3emdhdDh4ayJ9.CNygw7kmAPb6JGd0CFvUBg"
-    MAPBOX_STYLE_ID = "mapbox/light-v11"
+    MAPBOX_STYLE_ID = "mapbox://styles/hrussttt/cmb7ytivf00qa01qx8del9vtm" # Ваш бажаний стиль
+
+    # URL тайлів та атрибуція для Mapbox
     tiles_url = f"https://api.mapbox.com/styles/v1/{MAPBOX_STYLE_ID}/tiles/{{z}}/{{x}}/{{y}}@2x?access_token={MAPBOX_API_KEY}"
     attribution = (
         '© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> '
         '© <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a> '
         '<strong><a href="https://www.mapbox.com/map-feedback/" target="_blank">Improve this map</a></strong>'
     )
+    # --------------------------
+
     m = folium.Map(
         location=center,
         zoom_start=12,
-        tiles=tiles_url,
-        attr=attribution,
-        attributionControl=False  # Прибираємо стандартну атрибуцію Leaflet
+        tiles=tiles_url,  # Використовуємо URL тайлів Mapbox
+        attr=attribution   # Додаємо атрибуцію Mapbox
     )
-    return m
 
-def add_elements_to_map(folium_map_object):
-    """Додавання динамічних елементів (станції, користувачі) на карту"""
     # Додавання базових станцій
     for bs in st.session_state.base_stations:
-        if bs['load'] < 30: color = 'green'
-        elif bs['load'] < 70: color = 'orange'
-        else: color = 'red'
+        # Визначення кольору залежно від навантаження
+        if bs['load'] < 30:
+            color = 'green'
+        elif bs['load'] < 70:
+            color = 'orange'
+        else:
+            color = 'red'
+
         folium.Marker(
             [bs['lat'], bs['lon']],
-            popup=f"""<div style="font-family: Arial; font-size: 12px;"><b>{bs['name']}</b><br>ID: {bs['id']}<br>Потужність: {bs['power']} дБм<br>Користувачі: {bs['users']}<br>Навантаження: {bs['load']:.1f}%</div>""",
+            popup=f"""
+            <div style="font-family: Arial; font-size: 12px;">
+                <b>{bs['name']}</b><br>
+                ID: {bs['id']}<br>
+                Потужність: {bs['power']} дБм<br>
+                Користувачі: {bs['users']}<br>
+                Навантаження: {bs['load']:.1f}%
+            </div>
+            """,
             icon=folium.Icon(color=color, icon='tower-broadcast', prefix='fa'),
             tooltip=f"{bs['name']} ({bs['load']:.1f}% load)"
-        ).add_to(folium_map_object)
+        ).add_to(m)
+
+        # Зона покриття
         folium.Circle(
-            location=[bs['lat'], bs['lon']], radius=2000, color=color,
-            fillColor=color, fillOpacity=0.1, weight=2
-        ).add_to(folium_map_object)
+            location=[bs['lat'], bs['lon']],
+            radius=2000,  # 2 км
+            color=color,
+            fillColor=color,
+            fillOpacity=0.1,
+            weight=2
+        ).add_to(m)
 
     # Додавання активних користувачів
     for user in st.session_state.users:
         if user['active']:
-            if user['rsrp'] > -70: user_color = 'green'
-            elif user['rsrp'] > -90: user_color = 'orange'
-            else: user_color = 'red'
+            # Визначення кольору залежно від якості сигналу
+            if user['rsrp'] > -70:
+                user_color = 'green'
+            elif user['rsrp'] > -90:
+                user_color = 'orange'
+            else:
+                user_color = 'red'
+
             folium.Marker(
                 [user['lat'], user['lon']],
-                popup=f"""<div style="font-family: Arial; font-size: 12px;"><b>User {user['id']}</b><br>RSRP: {user['rsrp']:.1f} дБм<br>Serving BS: {user['serving_bs']}<br>Швидкість: {user['speed']} км/год<br>Throughput: {user['throughput']:.1f} Мбіт/с</div>""",
+                popup=f"""
+                <div style="font-family: Arial; font-size: 12px;">
+                    <b>User {user['id']}</b><br>
+                    RSRP: {user['rsrp']:.1f} дБм<br>
+                    Serving BS: {user['serving_bs']}<br>
+                    Швидкість: {user['speed']} км/год<br>
+                    Throughput: {user['throughput']:.1f} Мбіт/с
+                </div>
+                """,
                 icon=folium.Icon(color=user_color, icon='mobile', prefix='fa'),
                 tooltip=f"User {user['id']} (RSRP: {user['rsrp']:.1f} дБм)"
-            ).add_to(folium_map_object)
-    return folium_map_object
+            ).add_to(m)
+
+    return m
 
 def generate_new_user():
+    """Генерація нового користувача"""
     user_id = f"UE{len(st.session_state.users)+1:03d}"
+    
+    # Випадкова позиція в межах Вінниці
     lat = 49.2328 + np.random.uniform(-0.03, 0.03)
     lon = 28.4810 + np.random.uniform(-0.05, 0.05)
+    
+    # Знаходження найкращої BS
     best_bs, rsrp = find_best_bs(lat, lon, st.session_state.base_stations)
+    
     user = {
-        'id': user_id, 'lat': lat, 'lon': lon,
+        'id': user_id,
+        'lat': lat,
+        'lon': lon,
         'serving_bs': best_bs['id'] if best_bs else None,
-        'rsrp': rsrp, 'speed': np.random.choice([5, 20, 60, 90]),
-        'direction': np.random.uniform(0, 360),
-        'throughput': np.random.uniform(10, 100), 'active': True,
-        'handover_count': 0, 'last_handover': None
+        'rsrp': rsrp,
+        'speed': np.random.choice([5, 20, 60, 90]),  # км/год
+        'direction': np.random.uniform(0, 360),  # градуси
+        'throughput': np.random.uniform(10, 100),  # Мбіт/с
+        'active': True,
+        'handover_count': 0,
+        'last_handover': None
     }
+    
     return user
 
 def simulate_user_movement():
+    """Симуляція руху користувачів"""
     for user in st.session_state.users:
-        if not user['active']: continue
-        speed_ms = user['speed'] * 1000 / 3600
-        distance = speed_ms * 1
+        if not user['active']:
+            continue
+        
+        # Розрахунок нової позиції
+        speed_ms = user['speed'] * 1000 / 3600  # м/с
+        distance = speed_ms * 1  # за 1 секунду
+        
+        # Конвертація в градуси (приблизно)
         lat_change = (distance * np.cos(np.radians(user['direction']))) / 111111
         lon_change = (distance * np.sin(np.radians(user['direction']))) / (111111 * np.cos(np.radians(user['lat'])))
-        user['lat'] = np.clip(user['lat'] + lat_change, 49.20, 49.27)
-        user['lon'] = np.clip(user['lon'] + lon_change, 28.42, 28.55)
-        if np.random.random() < 0.05: user['direction'] = np.random.uniform(0, 360)
+        
+        user['lat'] += lat_change
+        user['lon'] += lon_change
+        
+        # Обмеження межами міста
+        user['lat'] = np.clip(user['lat'], 49.20, 49.27)
+        user['lon'] = np.clip(user['lon'], 28.42, 28.55)
+        
+        # Випадкова зміна напряму (5% шанс)
+        if np.random.random() < 0.05:
+            user['direction'] = np.random.uniform(0, 360)
+        
+        # Перевірка необхідності хендовера
         check_handover(user)
 
 def check_handover(user):
-    current_bs_obj = next((bs for bs in st.session_state.base_stations if bs['id'] == user['serving_bs']), None) # Змінено ім'я змінної
-    if not current_bs_obj: return
-    current_rsrp = calculate_rsrp(user['lat'], user['lon'], current_bs_obj['lat'], current_bs_obj['lon'], current_bs_obj['power'])
-    best_candidate_bs, best_candidate_rsrp = find_best_bs(user['lat'], user['lon'], st.session_state.base_stations) # Змінено імена змінних
-    hysteresis_margin = 5 # З вашого коду
-    if best_candidate_bs and best_candidate_bs['id'] != user['serving_bs'] and \
-       best_candidate_rsrp > current_rsrp + hysteresis_margin:
-        execute_handover(user, best_candidate_bs, current_rsrp, best_candidate_rsrp)
+    """Перевірка необхідності хендовера"""
+    current_bs = next((bs for bs in st.session_state.base_stations if bs['id'] == user['serving_bs']), None)
+    if not current_bs:
+        return
+    
+    # Розрахунок RSRP від поточної BS
+    current_rsrp = calculate_rsrp(user['lat'], user['lon'], current_bs['lat'], current_bs['lon'], current_bs['power'])
+    
+    # Знаходження найкращої BS
+    best_bs, best_rsrp = find_best_bs(user['lat'], user['lon'], st.session_state.base_stations)
+    
+    # Критерій хендовера: покращення > 5 дБ
+    if best_bs and best_bs['id'] != user['serving_bs'] and best_rsrp > current_rsrp + 5:
+        # Виконання хендовера
+        execute_handover(user, best_bs, current_rsrp, best_rsrp)
     else:
         user['rsrp'] = current_rsrp
 
 def execute_handover(user, new_bs, old_rsrp, new_rsrp):
+    """Виконання хендовера"""
     old_bs_id = user['serving_bs']
-    user.update({'serving_bs': new_bs['id'], 'rsrp': new_rsrp, 'handover_count': user['handover_count'] + 1, 'last_handover': datetime.now()})
-    success = new_rsrp > old_rsrp + 3
+    
+    # Оновлення користувача
+    user['serving_bs'] = new_bs['id']
+    user['rsrp'] = new_rsrp
+    user['handover_count'] += 1
+    user['last_handover'] = datetime.now()
+    
+    # Визначення успішності хендовера
+    success = new_rsrp > old_rsrp + 3  # мінімальне покращення 3 дБ
+    
+    # Збереження події
     handover_event = {
-        'timestamp': datetime.now(), 'user_id': user['id'], 'old_bs': old_bs_id, 'new_bs': new_bs['id'],
-        'old_rsrp': old_rsrp, 'new_rsrp': new_rsrp, 'improvement': new_rsrp - old_rsrp, 'success': success
+        'timestamp': datetime.now(),
+        'user_id': user['id'],
+        'old_bs': old_bs_id,
+        'new_bs': new_bs['id'],
+        'old_rsrp': old_rsrp,
+        'new_rsrp': new_rsrp,
+        'improvement': new_rsrp - old_rsrp,
+        'success': success
     }
+    
     st.session_state.handover_events.append(handover_event)
+    
+    # Оновлення метрик
     st.session_state.network_metrics['total_handovers'] += 1
-    if success: st.session_state.network_metrics['successful_handovers'] += 1
-    else: st.session_state.network_metrics['failed_handovers'] += 1
+    if success:
+        st.session_state.network_metrics['successful_handovers'] += 1
+    else:
+        st.session_state.network_metrics['failed_handovers'] += 1
 
 def update_network_metrics():
-    active_users_list = [u for u in st.session_state.users if u['active']] # Змінено ім'я змінної
-    st.session_state.network_metrics['active_users'] = len(active_users_list)
-    if active_users_list:
-        avg_rsrp_val = np.mean([u['rsrp'] for u in active_users_list if u['rsrp'] is not None])
-        avg_throughput_val = np.mean([u['throughput'] for u in active_users_list if u['throughput'] is not None])
-        st.session_state.network_metrics['average_rsrp'] = float(avg_rsrp_val) if not np.isnan(avg_rsrp_val) else -120.0
-        st.session_state.network_metrics['network_throughput'] = float(avg_throughput_val * len(active_users_list)) if not np.isnan(avg_throughput_val) else 0.0
-    else:
-        st.session_state.network_metrics.update({'average_rsrp': -120.0, 'network_throughput': 0.0})
+    """Оновлення мережевих метрик"""
+    active_users = [u for u in st.session_state.users if u['active']]
+    st.session_state.network_metrics['active_users'] = len(active_users)
+    
+    if active_users:
+        avg_rsrp = np.mean([u['rsrp'] for u in active_users])
+        avg_throughput = np.mean([u['throughput'] for u in active_users])
+        st.session_state.network_metrics['average_rsrp'] = avg_rsrp
+        st.session_state.network_metrics['network_throughput'] = avg_throughput * len(active_users)
+    
+    # Оновлення навантаження BS
     for bs in st.session_state.base_stations:
-        users_on_bs = len([u for u in active_users_list if u['serving_bs'] == bs['id']])
-        bs.update({'users': users_on_bs, 'load': min(100, users_on_bs * 20)}) # Використано *20 з вашого коду
+        bs['users'] = len([u for u in active_users if u['serving_bs'] == bs['id']])
+        bs['load'] = min(100, bs['users'] * 20)  # 20% на користувача
 
+# Головний інтерфейс
 st.title("🌐 LTE Network Simulator")
 st.markdown("### Інтерактивний симулятор мережі LTE в реальному часі")
 
+# Sidebar управління
 st.sidebar.header("🎛️ Управління симуляцією")
+
+# Кнопки управління
 if st.sidebar.button("🚀 Запустити мережу" if not st.session_state.network_active else "⏹️ Зупинити мережу"):
     st.session_state.network_active = not st.session_state.network_active
-    if not st.session_state.network_active:
-        st.session_state.users = []
-        st.session_state.handover_events = []
-        st.session_state.network_metrics.update({
-            'total_handovers': 0, 'successful_handovers': 0, 'failed_handovers': 0,
-            'average_rsrp': -85.0, 'network_throughput': 0.0, 'active_users': 0})
-        for bs_reset in st.session_state.base_stations: bs_reset.update({'users': 0, 'load': 0})
-st.sidebar.success("✅ Мережа активна") if st.session_state.network_active else st.sidebar.info("⏸️ Мережа зупинена")
 
+if st.session_state.network_active:
+    st.sidebar.success("✅ Мережа активна")
+else:
+    st.sidebar.info("⏸️ Мережа зупинена")
+
+# Налаштування симуляції
 st.sidebar.subheader("⚙️ Параметри")
 max_users = st.sidebar.slider("Максимум користувачів", 5, 50, 20)
-user_spawn_rate = st.sidebar.slider("Швидкість появи користувачів", 0.1, 2.0, 0.5) # З вашого коду
+user_spawn_rate = st.sidebar.slider("Швидкість появи користувачів", 0.1, 2.0, 0.5)
 
-if st.sidebar.button("➕ Додати користувача"): # З вашого коду
+# Кнопка додавання користувача
+if st.sidebar.button("➕ Додати користувача"):
     if len(st.session_state.users) < max_users:
-        st.session_state.users.append(generate_new_user())
-        st.rerun()
+        new_user = generate_new_user()
+        st.session_state.users.append(new_user)
+
+# Кнопка очищення
 if st.sidebar.button("🗑️ Очистити всіх користувачів"):
     st.session_state.users = []
     st.session_state.handover_events = []
-    st.rerun()
 
+# Основний контент
 col1, col2 = st.columns([2, 1])
+
 with col1:
     st.subheader("🗺️ Карта мережі")
-    base_map = create_network_map_base() # Виклик кешованої функції для бази
-    network_map_with_elements = add_elements_to_map(base_map) # Додавання елементів
-    st_folium(network_map_with_elements, width=700, height=500, returned_objects=["last_clicked"]) # Використання returned_objects з вашого коду
+    
+    # Створення та відображення карти
+    network_map = create_network_map()
+    map_data = st_folium(network_map, width=700, height=500, returned_objects=["last_clicked"])
 
 with col2:
     st.subheader("📊 Метрики мережі")
+    
+    # Оновлення метрик
     update_network_metrics()
+    
+    # Відображення метрик
     metrics = st.session_state.network_metrics
+    
     st.metric("Активні користувачі", metrics['active_users'])
     st.metric("Всього хендоверів", metrics['total_handovers'])
-    success_rate_display = f"{(metrics['successful_handovers'] / metrics['total_handovers'] * 100):.1f}%" if metrics['total_handovers'] > 0 else "N/A"
-    st.metric("Успішність хендоверів", success_rate_display)
+    
+    if metrics['total_handovers'] > 0:
+        success_rate = (metrics['successful_handovers'] / metrics['total_handovers']) * 100
+        st.metric("Успішність хендоверів", f"{success_rate:.1f}%")
+    
     st.metric("Середня RSRP", f"{metrics['average_rsrp']:.1f} дБм")
     st.metric("Пропускна здатність", f"{metrics['network_throughput']:.1f} Мбіт/с")
 
+# Статус базових станцій
 st.subheader("📡 Статус базових станцій")
-bs_data_display = [{'ID': b['id'], 'Назва': b['name'], 'Потужність (дБм)': b['power'], 'Користувачі': b['users'], 'Навантаження (%)': f"{b['load']:.1f}"} for b in st.session_state.base_stations]
-st.dataframe(pd.DataFrame(bs_data_display), use_container_width=True)
 
+bs_data = []
+for bs in st.session_state.base_stations:
+    bs_data.append({
+        'ID': bs['id'],
+        'Назва': bs['name'],
+        'Потужність (дБм)': bs['power'],
+        'Користувачі': bs['users'],
+        'Навантаження (%)': f"{bs['load']:.1f}"
+    })
+
+st.dataframe(pd.DataFrame(bs_data), use_container_width=True)
+
+# Останні хендовери
 if st.session_state.handover_events:
     st.subheader("🔄 Останні хендовери")
-    recent_handovers_display = st.session_state.handover_events[-5:]
-    ho_data_display = [{'Час': h['timestamp'].strftime('%H:%M:%S'), 'Користувач': h['user_id'], 'Від': h['old_bs'], 'До': h['new_bs'], 'Покращення (дБ)': f"{h.get('improvement', 0.0):.1f}", 'Статус': '✅ Успішно' if h['success'] else '❌ Невдало'} for h in reversed(recent_handovers_display)]
-    if ho_data_display: st.dataframe(pd.DataFrame(ho_data_display), use_container_width=True)
+    
+    recent_handovers = st.session_state.handover_events[-5:]  # Останні 5
+    ho_data = []
+    
+    for ho in reversed(recent_handovers):
+        ho_data.append({
+            'Час': ho['timestamp'].strftime('%H:%M:%S'),
+            'Користувач': ho['user_id'],
+            'Від': ho['old_bs'],
+            'До': ho['new_bs'],
+            'Покращення (дБ)': f"{ho['improvement']:.1f}",
+            'Статус': '✅ Успішно' if ho['success'] else '❌ Невдало'
+        })
+    
+    if ho_data:
+        st.dataframe(pd.DataFrame(ho_data), use_container_width=True)
 
-simulation_interval_seconds = 2.0 # З вашого коду (непрямо, time.sleep(2))
+# Автоматичне оновлення
 if st.session_state.network_active:
-    if len(st.session_state.users) < max_users and np.random.random() < user_spawn_rate * 0.1: # Логіка з вашого коду
-        st.session_state.users.append(generate_new_user())
+    # Додавання нових користувачів
+    if len(st.session_state.users) < max_users and np.random.random() < user_spawn_rate * 0.1:
+        new_user = generate_new_user()
+        st.session_state.users.append(new_user)
+    
+    # Симуляція руху
     simulate_user_movement()
-    update_network_metrics() # Важливо оновити метрики після симуляції
-    time.sleep(simulation_interval_seconds) # З вашого коду
+    
+    # Автоматичне оновлення через 2 секунди
+    time.sleep(2)
     st.rerun()
 
+# Інформаційна панель
 with st.expander("ℹ️ Про симулятор"):
     st.markdown("""
     ### Функції симулятора:
+    
     **🌐 Реальна мережа LTE** - 5 базових станцій з різними характеристиками
+    
     **👥 Динамічні користувачі** - автоматична генерація та рух користувачів
+    
     **📡 Реалтайм хендовери** - автоматичне переключення між станціями
+    
     **📊 Живі метрики** - моніторинг ефективності мережі в реальному часі
+    
     **🗺️ Інтерактивна карта** - візуалізація всіх елементів мережі
+    
     **⚙️ Налаштування** - контроль параметрів симуляції
+    
     ### Алгоритм хендовера:
     - Користувач переключається на нову BS, якщо RSRP покращується > 5 дБ
     - Враховується відстань та потужність передавачів
     - Автоматичний розрахунок успішності хендовера
     """)
-
