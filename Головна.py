@@ -318,9 +318,9 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.subheader("🗺️ Карта мережі")
     
-    # Створення та відображення карти
+    # Створення та відображення карти з ключем для збереження стану
     network_map = create_network_map()
-    map_data = st_folium(network_map, width=700, height=500, returned_objects=["last_clicked"])
+    map_data = st_folium(network_map, key="network_map", width=700, height=500, returned_objects=["last_clicked"])
 
 with col2:
     st.subheader("📊 Метрики мережі")
