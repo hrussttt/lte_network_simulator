@@ -1,5 +1,4 @@
 import streamlit as st
-import pydeck as pdk  # ДОДАНО
 import numpy as np
 import pandas as pd
 import folium
@@ -18,25 +17,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# ДОДАНО: Функція очищення даних для PyDeck (уникає миготіння)
-@st.cache_data
-def clean_data_for_pydeck(data):
-    """Очищення даних для PyDeck"""
-    if isinstance(data, list):
-        return [clean_data_for_pydeck(item) for item in data]
-    elif isinstance(data, dict):
-        return {k: clean_data_for_pydeck(v) for k, v in data.items()}
-    elif isinstance(data, np.integer):
-        return int(data)
-    elif isinstance(data, np.floating):
-        return float(data)
-    elif isinstance(data, np.ndarray):
-        return data.tolist()
-    elif pd.isna(data):
-        return None
-    else:
-        return data
 
 # Ініціалізація стану сесії
 if 'network_active' not in st.session_state:
@@ -64,11 +44,7 @@ if 'network_metrics' not in st.session_state:
         'active_users': 0
     }
 
-# ДОДАНО: Лічильник для карти (уникає миготіння)
-if 'map_update_trigger' not in st.session_state:
-    st.session_state.map_update_trigger = 0
-
-# Функції симуляції (БЕЗ ЗМІН)
+# Функції симуляції
 def calculate_rsrp(user_lat, user_lon, bs_lat, bs_lon, bs_power):
     """Розрахунок RSRP на основі відстані та потужності"""
     distance = geodesic((user_lat, user_lon), (bs_lat, bs_lon)).kilometers
@@ -93,127 +69,73 @@ def find_best_bs(user_lat, user_lon, base_stations):
     
     return best_bs, best_rsrp
 
-# ЗАМІНЕНО: Нова функція створення 3D Mapbox карти
-@st.cache_data
-def create_mapbox_lte_map(_update_trigger):
-    """Створення красивої 3D Mapbox карти без миготіння"""
+def create_network_map():
+    """Створення карти мережі"""
+    center = [49.2328, 28.4810]
+    m = folium.Map(location=center, zoom_start=12, tiles='OpenStreetMap')
     
-    # Підготовка даних базових станцій
-    bs_data = []
+    # Додавання базових станцій
     for bs in st.session_state.base_stations:
-        # Висота залежно від потужності та навантаження
-        height = float(bs['power'] + bs['load'])
-        
-        # Колір залежно від навантаження
+        # Визначення кольору залежно від навантаження
         if bs['load'] < 30:
-            color = [0, 255, 0, 200]  # Зелений
+            color = 'green'
         elif bs['load'] < 70:
-            color = [255, 165, 0, 200]  # Помаранчевий
+            color = 'orange'
         else:
-            color = [255, 0, 0, 200]  # Червоний
+            color = 'red'
         
-        bs_data.append({
-            'lat': float(bs['lat']),
-            'lon': float(bs['lon']),
-            'elevation': height,
-            'name': str(bs['name']),
-            'power': float(bs['power']),
-            'users': int(bs['users']),
-            'load': float(bs['load']),
-            'color': color
-        })
+        folium.Marker(
+            [bs['lat'], bs['lon']],
+            popup=f"""
+            <div style="font-family: Arial; font-size: 12px;">
+                <b>{bs['name']}</b><br>
+                ID: {bs['id']}<br>
+                Потужність: {bs['power']} дБм<br>
+                Користувачі: {bs['users']}<br>
+                Навантаження: {bs['load']:.1f}%
+            </div>
+            """,
+            icon=folium.Icon(color=color, icon='tower-broadcast', prefix='fa'),
+            tooltip=f"{bs['name']} ({bs['load']:.1f}% load)"
+        ).add_to(m)
+        
+        # Зона покриття
+        folium.Circle(
+            location=[bs['lat'], bs['lon']],
+            radius=2000,  # 2 км
+            color=color,
+            fillColor=color,
+            fillOpacity=0.1,
+            weight=2
+        ).add_to(m)
     
-    # Підготовка даних користувачів
-    users_data = []
+    # Додавання активних користувачів
     for user in st.session_state.users:
-        if user.get('active', True):
-            rsrp = float(user.get('rsrp', -85))
-            
-            # Колір залежно від якості сигналу
-            if rsrp > -70:
-                user_color = [0, 255, 0, 255]  # Зелений
-            elif rsrp > -90:
-                user_color = [255, 165, 0, 255]  # Помаранчевий  
+        if user['active']:
+            # Визначення кольору залежно від якості сигналу
+            if user['rsrp'] > -70:
+                user_color = 'green'
+            elif user['rsrp'] > -90:
+                user_color = 'orange'
             else:
-                user_color = [255, 0, 0, 255]  # Червоний
+                user_color = 'red'
             
-            users_data.append({
-                'lat': float(user['lat']),
-                'lon': float(user['lon']),
-                'elevation': 10.0,
-                'rsrp': rsrp,
-                'speed': float(user['speed']),
-                'user_id': str(user['id']),
-                'serving_bs': str(user.get('serving_bs', 'None')),
-                'color': user_color,
-                'size': float(30 + user['speed'])
-            })
+            folium.Marker(
+                [user['lat'], user['lon']],
+                popup=f"""
+                <div style="font-family: Arial; font-size: 12px;">
+                    <b>User {user['id']}</b><br>
+                    RSRP: {user['rsrp']:.1f} дБм<br>
+                    Serving BS: {user['serving_bs']}<br>
+                    Швидкість: {user['speed']} км/год<br>
+                    Throughput: {user['throughput']:.1f} Мбіт/с
+                </div>
+                """,
+                icon=folium.Icon(color=user_color, icon='mobile', prefix='fa'),
+                tooltip=f"User {user['id']} (RSRP: {user['rsrp']:.1f} дБм)"
+            ).add_to(m)
     
-    # Очищення даних для PyDeck
-    bs_clean = clean_data_for_pydeck(bs_data)
-    users_clean = clean_data_for_pydeck(users_data)
-    
-    # Створення шарів карти
-    layers = []
-    
-    # Шар 3D веж базових станцій
-    if bs_clean:
-        layers.append(pdk.Layer(
-            'ColumnLayer',
-            data=bs_clean,
-            get_position='[lon, lat]',
-            get_elevation='elevation',
-            elevation_scale=1,
-            radius=80,
-            get_fill_color='color',
-            pickable=True,
-            extruded=True
-        ))
-    
-    # Шар користувачів
-    if users_clean:
-        layers.append(pdk.Layer(
-            'ScatterplotLayer',
-            data=users_clean,
-            get_position='[lon, lat]',
-            get_radius='size',
-            get_fill_color='color',
-            get_line_color=[255, 255, 255, 200],
-            pickable=True,
-            filled=True,
-            line_width_min_pixels=2
-        ))
-    
-    # Налаштування камери
-    view_state = pdk.ViewState(
-        latitude=49.2328,
-        longitude=28.4810,
-        zoom=11.5,
-        pitch=50,  # 3D нахил
-        bearing=0
-    )
-    
-    # Tooltip для інтерактивності
-    tooltip = {
-        "html": """
-        <div style="background: rgba(0,0,0,0.8); color: white; padding: 12px; border-radius: 8px;">
-            <b>{name}</b><br/>
-            Потужність: {power} дБм<br/>
-            Користувачі: {users}<br/>
-            Навантаження: {load}%<br/>
-            RSRP: {rsrp} дБм<br/>
-            Швидкість: {speed} км/год
-        </div>
-        """,
-        "style": {"color": "white"}
-    }
-    
-    return pdk.Deck(
-        layers=layers,
-        initial_view_state=view_state,
-        tooltip=tooltip,
-        map_style='mapbox://styles/mapbox/dark-v10'  # Красивий темний стиль Mapbox
-    )
+    return m
 
 def generate_new_user():
     """Генерація нового користувача"""
@@ -375,17 +297,11 @@ if st.sidebar.button("🗑️ Очистити всіх користувачів
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("🗺️ 3D Карта мережі LTE (Mapbox)")
+    st.subheader("🗺️ Карта мережі")
     
-    # ЗАМІНЕНО: Відображення нової Mapbox карти
-    if st.session_state.network_active:
-        st.session_state.map_update_trigger += 1
-    
-    try:
-        deck = create_mapbox_lte_map(st.session_state.map_update_trigger)
-        selected_data = st.pydeck_chart(deck, use_container_width=True, height=500)
-    except Exception as e:
-        st.error(f"Помилка відображення карти: {str(e)}")
+    # Створення та відображення карти
+    network_map = create_network_map()
+    map_data = st_folium(network_map, width=700, height=500, returned_objects=["last_clicked"])
 
 with col2:
     st.subheader("📊 Метрики мережі")
@@ -468,13 +384,12 @@ with st.expander("ℹ️ Про симулятор"):
     
     **📊 Живі метрики** - моніторинг ефективності мережі в реальному часі
     
-    **🗺️ 3D Mapbox карта** - красива інтерактивна візуалізація без миготіння
+    **🗺️ Інтерактивна карта** - візуалізація всіх елементів мережі
     
     **⚙️ Налаштування** - контроль параметрів симуляції
     
-    ### Покращення карти:
-    - **3D вежі базових станцій** з висотою залежно від потужності
-    - **Темний стиль Mapbox** для професійного вигляду
-    - **Без миготіння** при оновленні даних
-    - **Інтерактивні підказки** з детальною інформацією
+    ### Алгоритм хендовера:
+    - Користувач переключається на нову BS, якщо RSRP покращується > 5 дБ
+    - Враховується відстань та потужність передавачів
+    - Автоматичний розрахунок успішності хендовера
     """)
