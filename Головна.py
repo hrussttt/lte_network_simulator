@@ -75,7 +75,7 @@ def create_network_map():
 
     # ---- Зміни для Mapbox ----
     MAPBOX_API_KEY = "pk.eyJ1IjoiaHJ1c3N0dHQiLCJhIjoiY21iNnR0OXh1MDJ2ODJsczk3emdhdDh4ayJ9.CNygw7kmAPb6JGd0CFvUBg"
-    MAPBOX_STYLE_ID = "mapbox://styles/hrussttt/cmb7ytivf00qa01qx8del9vtm" # Ваш бажаний стиль
+    MAPBOX_STYLE_ID = "mapbox/streets-v12" # Ваш бажаний стиль
 
     # URL тайлів та атрибуція для Mapbox
     tiles_url = f"https://api.mapbox.com/styles/v1/{MAPBOX_STYLE_ID}/tiles/{{z}}/{{x}}/{{y}}@2x?access_token={MAPBOX_API_KEY}"
