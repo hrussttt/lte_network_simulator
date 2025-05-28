@@ -28,7 +28,7 @@ if 'base_stations' not in st.session_state:
         {'id': 'BS002', 'name': 'Північна', 'lat': 49.2520, 'lon': 28.4590, 'power': 42, 'users': 0, 'load': 0},
         {'id': 'BS003', 'name': 'Східна', 'lat': 49.2180, 'lon': 28.5120, 'power': 40, 'users': 0, 'load': 0},
         {'id': 'BS004', 'name': 'Західна', 'lat': 49.2290, 'lon': 28.4650, 'power': 43, 'users': 0, 'load': 0},
-        {'id': 'BS005', 'name': 'Południна', 'lat': 49.2150, 'lon': 28.4420, 'power': 41, 'users': 0, 'load': 0},
+        {'id': 'BS005', 'name': 'Південна', 'lat': 49.2150, 'lon': 28.4420, 'power': 41, 'users': 0, 'load': 0},
     ]
 if 'handover_events' not in st.session_state:
     st.session_state.handover_events = []
@@ -70,7 +70,6 @@ def create_network_map():
     # Підготовка даних для базових станцій
     bs_data = []
     for bs in st.session_state.base_stations:
-        # Визначення кольору залежно від навантаження
         if bs['load'] < 30:
             color = 'green'
         elif bs['load'] < 70:
@@ -85,17 +84,15 @@ def create_network_map():
             'load': bs['load'],
             'users': bs['users'],
             'power': bs['power'],
-            'color': color,
-            'type': 'BaseStation'
+            'color': color
         })
     
     # Підготовка даних для користувачів
     user_data = []
     for user in st.session_state.users:
         if user['active']:
-            # Визначення кольору залежно від RSRP
             if user['rsrp'] > -70:
-                color = 'green'
+                color = 'lightgreen'
             elif user['rsrp'] > -85:
                 color = 'yellow'
             else:
@@ -108,8 +105,7 @@ def create_network_map():
                 'rsrp': user['rsrp'],
                 'serving_bs': user['serving_bs'],
                 'speed': user['speed'],
-                'color': color,
-                'type': 'User'
+                'color': color
             })
     
     # Створення фігури
@@ -119,16 +115,17 @@ def create_network_map():
     if bs_data:
         bs_df = pd.DataFrame(bs_data)
         
-        for color in ['green', 'orange', 'red']:
-            color_data = bs_df[bs_df['color'] == color]
+        # Групування по кольорах
+        for color_name in ['green', 'orange', 'red']:
+            color_data = bs_df[bs_df['color'] == color_name]
             if not color_data.empty:
                 fig.add_trace(go.Scattermapbox(
                     lat=color_data['lat'],
                     lon=color_data['lon'],
                     mode='markers',
                     marker=dict(
-                        size=15,
-                        color=color,
+                        size=20,
+                        color=color_name,
                         symbol='circle'
                     ),
                     text=color_data['name'],
@@ -137,7 +134,7 @@ def create_network_map():
                                 'Користувачі: %{customdata[1]}<br>' +
                                 'Потужність: %{customdata[2]} дБм<extra></extra>',
                     customdata=color_data[['load', 'users', 'power']].values,
-                    name=f'БС ({color})',
+                    name=f'БС (навантаження {color_name})',
                     showlegend=True
                 ))
     
@@ -145,16 +142,18 @@ def create_network_map():
     if user_data:
         user_df = pd.DataFrame(user_data)
         
-        for color in ['green', 'yellow', 'red']:
-            color_data = user_df[user_df['color'] == color]
+        # Групування по кольорах
+        for color_name in ['lightgreen', 'yellow', 'red']:
+            color_data = user_df[user_df['color'] == color_name]
             if not color_data.empty:
+                signal_quality = 'Відмінний' if color_name == 'lightgreen' else ('Добрий' if color_name == 'yellow' else 'Слабкий')
                 fig.add_trace(go.Scattermapbox(
                     lat=color_data['lat'],
                     lon=color_data['lon'],
                     mode='markers',
                     marker=dict(
-                        size=8,
-                        color=color,
+                        size=10,
+                        color=color_name,
                         symbol='triangle-up'
                     ),
                     text=color_data['id'],
@@ -163,7 +162,7 @@ def create_network_map():
                                 'Обслуговуюча БС: %{customdata[1]}<br>' +
                                 'Швидкість: %{customdata[2]} км/год<extra></extra>',
                     customdata=color_data[['rsrp', 'serving_bs', 'speed']].values,
-                    name=f'Користувачі ({color})',
+                    name=f'Користувачі ({signal_quality})',
                     showlegend=True
                 ))
     
@@ -184,47 +183,39 @@ def create_network_map():
             x=0.01,
             bgcolor="rgba(255,255,255,0.8)"
         ),
-        uirevision='constant'  # Ключове для запобігання морганню
+        uirevision='constant'
     )
     
     return fig
 
 def move_user(user):
     """Переміщення користувача"""
-    # Випадкове переміщення
-    speed_ms = user['speed'] / 3.6  # км/год в м/с
-    distance_m = speed_ms * 1  # за 1 секунду
+    speed_ms = user['speed'] / 3.6
+    distance_m = speed_ms * 1
     
-    # Конвертація в градуси (приблизно)
     lat_change = (distance_m * np.cos(np.radians(user['direction']))) / 111111
     lon_change = (distance_m * np.sin(np.radians(user['direction']))) / (111111 * np.cos(np.radians(user['lat'])))
     
     user['lat'] += lat_change
     user['lon'] += lon_change
     
-    # Обмеження координат (для Вінниці)
     user['lat'] = np.clip(user['lat'], 49.20, 49.27)
     user['lon'] = np.clip(user['lon'], 28.42, 28.55)
     
-    # Випадкова зміна напряму (5% ймовірність)
     if random.random() < 0.05:
         user['direction'] = random.uniform(0, 360)
 
 def update_user_metrics(user):
     """Оновлення метрик користувача"""
-    # Знаходження найкращої BS
     best_bs, best_rsrp = find_best_bs(user['lat'], user['lon'], st.session_state.base_stations)
     
     if best_bs:
-        # Перевірка хендовера
         if user['serving_bs'] != best_bs['id'] and best_rsrp > user['rsrp'] + 5:
-            # Виконання хендовера
             old_bs = user['serving_bs']
             user['serving_bs'] = best_bs['id']
             user['handover_count'] += 1
             user['last_handover'] = datetime.now()
             
-            # Додавання події хендовера
             handover_event = {
                 'timestamp': datetime.now(),
                 'user_id': user['id'],
@@ -237,7 +228,6 @@ def update_user_metrics(user):
             }
             st.session_state.handover_events.append(handover_event)
             
-            # Оновлення статистики
             st.session_state.network_metrics['total_handovers'] += 1
             if handover_event['success']:
                 st.session_state.network_metrics['successful_handovers'] += 1
@@ -245,7 +235,7 @@ def update_user_metrics(user):
                 st.session_state.network_metrics['failed_handovers'] += 1
         
         user['rsrp'] = best_rsrp
-        user['throughput'] = max(0, (best_rsrp + 120) * 2)  # Спрощений розрахунок
+        user['throughput'] = max(0, (best_rsrp + 120) * 2)
 
 def add_random_user():
     """Додавання випадкового користувача"""
@@ -264,7 +254,6 @@ def add_random_user():
         'last_handover': None
     }
     
-    # Знаходження початкової BS
     best_bs, best_rsrp = find_best_bs(user['lat'], user['lon'], st.session_state.base_stations)
     if best_bs:
         user['serving_bs'] = best_bs['id']
@@ -276,7 +265,7 @@ def update_bs_load():
     """Оновлення навантаження базових станцій"""
     for bs in st.session_state.base_stations:
         bs['users'] = len([u for u in st.session_state.users if u['active'] and u['serving_bs'] == bs['id']])
-        bs['load'] = min(100, bs['users'] * 2)  # Спрощений розрахунок
+        bs['load'] = min(100, bs['users'] * 2)
 
 # Заголовок
 st.title("📡 Симулятор хендовера LTE в мережі м. Вінниця")
