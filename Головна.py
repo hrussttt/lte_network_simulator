@@ -43,6 +43,10 @@ if 'network_metrics' not in st.session_state:
         'network_throughput': 0,
         'active_users': 0
     }
+if 'map_center' not in st.session_state:
+    st.session_state.map_center = [49.2328, 28.4810]
+if 'map_zoom' not in st.session_state:
+    st.session_state.map_zoom = 12
 
 # Функції симуляції
 def calculate_rsrp(user_lat, user_lon, bs_lat, bs_lon, bs_power):
@@ -71,7 +75,8 @@ def find_best_bs(user_lat, user_lon, base_stations):
 
 def create_network_map():
     """Створення карти мережі з використанням тайлів Mapbox"""
-    center = [49.2328, 28.4810]
+    center = st.session_state.map_center
+    zoom = st.session_state.map_zoom
 
     # ---- Зміни для Mapbox ----
     MAPBOX_API_KEY = "pk.eyJ1IjoiaHJ1c3N0dHQiLCJhIjoiY21iNnR0OXh1MDJ2ODJsczk3emdhdDh4ayJ9.CNygw7kmAPb6JGd0CFvUBg"
@@ -88,7 +93,7 @@ def create_network_map():
 
     m = folium.Map(
         location=center,
-        zoom_start=12,
+        zoom_start=zoom,
         tiles=tiles_url,  # Використовуємо URL тайлів Mapbox
         attr=attribution   # Додаємо атрибуцію Mapbox
     )
@@ -318,9 +323,24 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.subheader("🗺️ Карта мережі")
     
-    # Створення та відображення карти з ключем для збереження стану
+    # Використання placeholder для динамічного оновлення карти
+    map_placeholder = st.empty()
     network_map = create_network_map()
-    map_data = st_folium(network_map, key="network_map", width=700, height=500, returned_objects=["last_clicked"])
+    with map_placeholder.container():
+        map_data = st_folium(
+            network_map,
+            key="network_map",
+            width=700,
+            height=500,
+            returned_objects=["last_clicked", "center", "zoom"],
+            center=st.session_state.map_center,
+            zoom=st.session_state.map_zoom
+        )
+        # Оновлення центру та зуму карти на основі взаємодії користувача
+        if map_data and "center" in map_data:
+            st.session_state.map_center = [map_data["center"]["lat"], map_data["center"]["lng"]]
+        if map_data and "zoom" in map_data:
+            st.session_state.map_zoom = map_data["zoom"]
 
 with col2:
     st.subheader("📊 Метрики мережі")
@@ -376,7 +396,7 @@ if st.session_state.handover_events:
     if ho_data:
         st.dataframe(pd.DataFrame(ho_data), use_container_width=True)
 
-# Автоматичне оновлення
+# Автоматичне оновлення без st.rerun()
 if st.session_state.network_active:
     # Додавання нових користувачів
     if len(st.session_state.users) < max_users and np.random.random() < user_spawn_rate * 0.1:
@@ -386,9 +406,18 @@ if st.session_state.network_active:
     # Симуляція руху
     simulate_user_movement()
     
-    # Автоматичне оновлення через 2 секунди
-    time.sleep(2)
-    st.rerun()
+    # Оновлення без перезапуску сторінки (видалено st.rerun())
+    # Використовуємо JavaScript для автоматичного оновлення через 2 секунди
+    st.markdown(
+        """
+        <script>
+        setTimeout(function() {
+            window.location.reload();
+        }, 2000);
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
 
 # Інформаційна панель
 with st.expander("ℹ️ Про симулятор"):
