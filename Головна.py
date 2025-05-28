@@ -1,14 +1,16 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import folium
-from streamlit_folium import st_folium
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 import time
 import random
 from geopy.distance import geodesic
+
+# Константи Mapbox
+MAPBOX_API_KEY = "pk.eyJ1IjoiaHJ1c3N0dHQiLCJhIjoiY21iNnR0OXh1MDJ2ODJsczk3emdhdDh4ayJ9.CNygw7kmAPb6JGd0CFvUBg"
+MAPBOX_STYLE_ID = "mapbox/streets-v12"
 
 # Налаштування сторінки
 st.set_page_config(
@@ -43,10 +45,6 @@ if 'network_metrics' not in st.session_state:
         'network_throughput': 0,
         'active_users': 0
     }
-if 'map_center' not in st.session_state:
-    st.session_state.map_center = [49.2328, 28.4810]
-if 'map_zoom' not in st.session_state:
-    st.session_state.map_zoom = 12
 
 # Функції симуляції
 def calculate_rsrp(user_lat, user_lon, bs_lat, bs_lon, bs_power):
@@ -74,92 +72,138 @@ def find_best_bs(user_lat, user_lon, base_stations):
     return best_bs, best_rsrp
 
 def create_network_map():
-    """Створення карти мережі з використанням тайлів Mapbox"""
-    center = st.session_state.map_center
-    zoom = st.session_state.map_zoom
-
-    # ---- Зміни для Mapbox ----
-    MAPBOX_API_KEY = "pk.eyJ1IjoiaHJ1c3N0dHQiLCJhIjoiY21iNnR0OXh1MDJ2ODJsczk3emdhdDh4ayJ9.CNygw7kmAPb6JGd0CFvUBg"
-    MAPBOX_STYLE_ID = "mapbox/streets-v12" # Ваш бажаний стиль
-
-    # URL тайлів та атрибуція для Mapbox
-    tiles_url = f"https://api.mapbox.com/styles/v1/{MAPBOX_STYLE_ID}/tiles/{{z}}/{{x}}/{{y}}@2x?access_token={MAPBOX_API_KEY}"
-    attribution = (
-        '© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> '
-        '© <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a> '
-        '<strong><a href="https://www.mapbox.com/map-feedback/" target="_blank">Improve this map</a></strong>'
-    )
-    # --------------------------
-
-    m = folium.Map(
-        location=center,
-        zoom_start=zoom,
-        tiles=tiles_url,  # Використовуємо URL тайлів Mapbox
-        attr=attribution   # Додаємо атрибуцію Mapbox
-    )
-
-    # Додавання базових станцій
+    """Створення карти мережі з Mapbox"""
+    fig = go.Figure()
+    
+    # Додавання зон покриття (кола)
     for bs in st.session_state.base_stations:
-        # Визначення кольору залежно від навантаження
         if bs['load'] < 30:
             color = 'green'
         elif bs['load'] < 70:
             color = 'orange'
         else:
             color = 'red'
-
-        folium.Marker(
-            [bs['lat'], bs['lon']],
-            popup=f"""
-            <div style="font-family: Arial; font-size: 12px;">
-                <b>{bs['name']}</b><br>
-                ID: {bs['id']}<br>
-                Потужність: {bs['power']} дБм<br>
-                Користувачі: {bs['users']}<br>
-                Навантаження: {bs['load']:.1f}%
-            </div>
-            """,
-            icon=folium.Icon(color=color, icon='tower-broadcast', prefix='fa'),
-            tooltip=f"{bs['name']} ({bs['load']:.1f}% load)"
-        ).add_to(m)
-
-        # Зона покриття
-        folium.Circle(
-            location=[bs['lat'], bs['lon']],
-            radius=2000,  # 2 км
-            color=color,
-            fillColor=color,
-            fillOpacity=0.1,
-            weight=2
-        ).add_to(m)
-
+        
+        # Створення кола для зони покриття
+        circle_lats, circle_lons = [], []
+        radius_km = 2  # 2 км радіус
+        for angle in range(0, 361, 10):
+            lat_offset = radius_km * np.cos(np.radians(angle)) / 111.0
+            lon_offset = radius_km * np.sin(np.radians(angle)) / (111.0 * np.cos(np.radians(bs['lat'])))
+            circle_lats.append(bs['lat'] + lat_offset)
+            circle_lons.append(bs['lon'] + lon_offset)
+        
+        fig.add_trace(go.Scattermapbox(
+            lat=circle_lats,
+            lon=circle_lons,
+            mode='lines',
+            line=dict(color=color, width=2),
+            fill='toself',
+            fillcolor=color,
+            opacity=0.1,
+            hoverinfo='skip',
+            showlegend=False
+        ))
+    
+    # Додавання базових станцій
+    bs_lats = []
+    bs_lons = []
+    bs_colors = []
+    bs_texts = []
+    bs_hover_texts = []
+    
+    for bs in st.session_state.base_stations:
+        if bs['load'] < 30:
+            color = 'green'
+        elif bs['load'] < 70:
+            color = 'orange'
+        else:
+            color = 'red'
+        
+        bs_lats.append(bs['lat'])
+        bs_lons.append(bs['lon'])
+        bs_colors.append(color)
+        bs_texts.append('📡')
+        bs_hover_texts.append(f"<b>{bs['name']}</b><br>" +
+                             f"ID: {bs['id']}<br>" +
+                             f"Потужність: {bs['power']} дБм<br>" +
+                             f"Користувачі: {bs['users']}<br>" +
+                             f"Навантаження: {bs['load']:.1f}%")
+    
+    fig.add_trace(go.Scattermapbox(
+        lat=bs_lats,
+        lon=bs_lons,
+        mode='markers+text',
+        marker=dict(size=15, color=bs_colors),
+        text=bs_texts,
+        textposition="middle center",
+        textfont=dict(size=12),
+        hovertext=bs_hover_texts,
+        hoverinfo='text',
+        name='Базові станції'
+    ))
+    
     # Додавання активних користувачів
-    for user in st.session_state.users:
-        if user['active']:
-            # Визначення кольору залежно від якості сигналу
-            if user['rsrp'] > -70:
-                user_color = 'green'
-            elif user['rsrp'] > -90:
-                user_color = 'orange'
-            else:
-                user_color = 'red'
-
-            folium.Marker(
-                [user['lat'], user['lon']],
-                popup=f"""
-                <div style="font-family: Arial; font-size: 12px;">
-                    <b>User {user['id']}</b><br>
-                    RSRP: {user['rsrp']:.1f} дБм<br>
-                    Serving BS: {user['serving_bs']}<br>
-                    Швидкість: {user['speed']} км/год<br>
-                    Throughput: {user['throughput']:.1f} Мбіт/с
-                </div>
-                """,
-                icon=folium.Icon(color=user_color, icon='mobile', prefix='fa'),
-                tooltip=f"User {user['id']} (RSRP: {user['rsrp']:.1f} дБм)"
-            ).add_to(m)
-
-    return m
+    if st.session_state.users:
+        user_lats = []
+        user_lons = []
+        user_colors = []
+        user_texts = []
+        user_hover_texts = []
+        
+        for user in st.session_state.users:
+            if user['active']:
+                if user['rsrp'] > -70:
+                    user_color = 'green'
+                elif user['rsrp'] > -90:
+                    user_color = 'orange'
+                else:
+                    user_color = 'red'
+                
+                user_lats.append(user['lat'])
+                user_lons.append(user['lon'])
+                user_colors.append(user_color)
+                user_texts.append('📱')
+                user_hover_texts.append(f"<b>User {user['id']}</b><br>" +
+                                       f"RSRP: {user['rsrp']:.1f} дБм<br>" +
+                                       f"Serving BS: {user['serving_bs']}<br>" +
+                                       f"Швидкість: {user['speed']} км/год<br>" +
+                                       f"Throughput: {user['throughput']:.1f} Мбіт/с")
+        
+        if user_lats:
+            fig.add_trace(go.Scattermapbox(
+                lat=user_lats,
+                lon=user_lons,
+                mode='markers+text',
+                marker=dict(size=10, color=user_colors),
+                text=user_texts,
+                textposition="middle center",
+                textfont=dict(size=8),
+                hovertext=user_hover_texts,
+                hoverinfo='text',
+                name='Користувачі'
+            ))
+    
+    fig.update_layout(
+        mapbox=dict(
+            accesstoken=MAPBOX_API_KEY,
+            style=MAPBOX_STYLE_ID,
+            center=dict(lat=49.2328, lon=28.4810),
+            zoom=11
+        ),
+        height=500,
+        margin=dict(l=0, r=0, t=0, b=0),
+        showlegend=True,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01,
+            bgcolor="rgba(255,255,255,0.8)"
+        )
+    )
+    
+    return fig
 
 def generate_new_user():
     """Генерація нового користувача"""
@@ -323,24 +367,9 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.subheader("🗺️ Карта мережі")
     
-    # Використання placeholder для динамічного оновлення карти
-    map_placeholder = st.empty()
+    # Створення та відображення карти
     network_map = create_network_map()
-    with map_placeholder.container():
-        map_data = st_folium(
-            network_map,
-            key="network_map",
-            width=700,
-            height=500,
-            returned_objects=["last_clicked", "center", "zoom"],
-            center=st.session_state.map_center,
-            zoom=st.session_state.map_zoom
-        )
-        # Оновлення центру та зуму карти на основі взаємодії користувача
-        if map_data and "center" in map_data:
-            st.session_state.map_center = [map_data["center"]["lat"], map_data["center"]["lng"]]
-        if map_data and "zoom" in map_data:
-            st.session_state.map_zoom = map_data["zoom"]
+    st.plotly_chart(network_map, use_container_width=True)
 
 with col2:
     st.subheader("📊 Метрики мережі")
@@ -396,7 +425,7 @@ if st.session_state.handover_events:
     if ho_data:
         st.dataframe(pd.DataFrame(ho_data), use_container_width=True)
 
-# Автоматичне оновлення без st.rerun()
+# Автоматичне оновлення
 if st.session_state.network_active:
     # Додавання нових користувачів
     if len(st.session_state.users) < max_users and np.random.random() < user_spawn_rate * 0.1:
@@ -406,18 +435,9 @@ if st.session_state.network_active:
     # Симуляція руху
     simulate_user_movement()
     
-    # Оновлення без перезапуску сторінки (видалено st.rerun())
-    # Використовуємо JavaScript для автоматичного оновлення через 2 секунди
-    st.markdown(
-        """
-        <script>
-        setTimeout(function() {
-            window.location.reload();
-        }, 2000);
-        </script>
-        """,
-        unsafe_allow_html=True
-    )
+    # Автоматичне оновлення через 2 секунди
+    time.sleep(2)
+    st.rerun()
 
 # Інформаційна панель
 with st.expander("ℹ️ Про симулятор"):
